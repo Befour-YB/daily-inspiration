@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>每日灵感</title>
+<style>
+  /* 本地字体：优先喜鹊宋体，回退 Songti SC (Apple 宋体) */
+  @font-face {
+    font-family: 'XiQueSong';
+    src: local('喜鹊宋体'), local('XiQue Song'), local('XiQueSong');
+    font-display: swap;
+  }
+  /* 喜鹊宋体使用时替换：把下面 font-family 里的 'Songti SC' 替换为 'XiQueSong' 即可 */
+  /* 字体文件放 fonts/ 目录后，解注释：
+  @font-face {
+    font-family: 'XiQueSong';
+    src: url('fonts/XiQueSong.otf') format('opentype');
+    font-display: swap;
+  }
+  */
+
+  :root {
+    --paper: #faf7f2;
+    --ink: #1c1c1c;
+    --ink-light: #555;
+    --accent: #c75b39;
+    --accent-muted: #e8c4b0;
+    --divider: #e0d9ce;
+    --tag-bg: #f0ebe2;
+    --shadow: 0 2px 20px rgba(0,0,0,0.06);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #e8e4dc;
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px;
+    font-family: 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  }
+
+  .paper {
+    width: 750px;
+    background: var(--paper);
+    box-shadow: var(--shadow);
+    padding: 72px 64px 56px;
+    position: relative;
+  }
+
+  .paper::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .paper > * { position: relative; z-index: 1; }
+
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 24px;
+    margin-bottom: 48px;
+  }
+
+  .masthead-title {
+    font-family: 'Songti SC', serif;
+    font-size: 42px;
+    font-weight: 900;
+    color: var(--ink);
+    letter-spacing: 0.08em;
+  }
+  .masthead-title span { color: var(--accent); }
+
+  .masthead-meta {
+    font-family: 'Songti SC', serif;
+    font-size: 15px;
+    color: var(--ink-light);
+    text-align: right;
+    line-height: 1.6;
+  }
+  .masthead-meta .date { font-weight: 600; color: var(--ink); font-size: 16px; }
+
+  .section { margin-bottom: 44px; }
+
+  .section-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .section-label .numeral {
+    font-family: 'Songti SC', serif;
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .section-label .title {
+    font-family: 'Songti SC', serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: 0.04em;
+  }
+  .section-label .title-divider {
+    width: 32px;
+    height: 1px;
+    background: var(--accent);
+    margin-left: 4px;
+  }
+
+  .section-image {
+    width: 100%;
+    margin-bottom: 16px;
+    border-radius: 4px;
+    overflow: hidden;
+    line-height: 0;
+    border: 1px solid var(--divider);
+  }
+  .section-image img {
+    width: 100%;
+    display: block;
+    object-fit: cover;
+    max-height: 360px;
+  }
+
+  .section-body {
+    font-size: 15px;
+    line-height: 1.85;
+    color: var(--ink);
+    letter-spacing: 0.02em;
+  }
+
+  .section-source {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--ink-light);
+  }
+  .section-source a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid var(--accent-muted);
+  }
+
+  .principle-block {
+    margin: 44px 0;
+    padding: 28px 32px;
+    border-left: 3px solid var(--accent);
+    background: var(--tag-bg);
+  }
+  .principle-block .principle-title {
+    font-family: 'Songti SC', serif;
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 8px;
+    letter-spacing: 0.04em;
+  }
+  .principle-block .principle-body {
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--ink-light);
+  }
+
+  .quote-block {
+    margin-top: 44px;
+    text-align: center;
+    padding: 0 24px;
+  }
+  .quote-text {
+    font-family: 'Songti SC', serif;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.7;
+    letter-spacing: 0.04em;
+  }
+  .quote-text-cn { margin-bottom: 6px; }
+  .quote-text-en {
+    font-size: 15px;
+    color: var(--ink-light);
+    font-style: italic;
+    font-weight: 400;
+  }
+  .quote-attribution {
+    margin-top: 12px;
+    font-size: 14px;
+    color: var(--ink-light);
+    letter-spacing: 0.05em;
+  }
+  .quote-attribution strong { color: var(--accent); font-weight: 600; }
+  .quote-attribution .en-name {
+    font-size: 13px;
+    color: var(--ink-light);
+    font-weight: 400;
+  }
+
+  .footer {
+    margin-top: 52px;
+    padding-top: 20px;
+    border-top: 1px solid var(--divider);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .footer-left {
+    font-family: 'Songti SC', serif;
+    font-size: 13px;
+    color: var(--ink-light);
+  }
+  .footer-right {
+    font-size: 11px;
+    color: #aaa;
+    letter-spacing: 0.04em;
+  }
+
+  .section-divider {
+    text-align: center;
+    color: var(--divider);
+    font-size: 8px;
+    letter-spacing: 6px;
+    margin: -12px 0 32px;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="paper">
+
+  <header class="masthead">
+    <div>
+      <div class="masthead-title">每日<span>灵</span>感</div>
+    </div>
+    <div class="masthead-meta">
+      <div class="date">2026.04.29</div>
+      <div>星期三 · 第 1 期</div>
+    </div>
+  </header>
+
+  <!-- 壹观 -->
+  <section class="section">
+    <div class="section-label">
+      <span class="numeral">壹</span>
+      <span class="title">观</span>
+      <span class="title-divider"></span>
+    </div>
+    <div class="section-image">
+      <img src="images/01-yiguan.jpg" alt="LOVE rebrands LARK Distillery" />
+    </div>
+    <p class="section-body">
+      曼彻斯特工作室 LOVE 为塔斯马尼亚威士忌品牌 LARK 做的品牌重塑，完全抛弃了传统威士忌的「深色木纹+衬线体」套路。新标志以塔斯马尼亚岛轮廓为原型，演化为一道流动的烫金弧线；瓶身采用不对称切割，灵感来自岛上侏罗纪玄武岩柱。整套视觉避开了苏格兰威士忌的沉稳叙事，转而用「神秘岛屿」的轻逸感，为亚洲和欧洲高端市场打开了一个全新的烈酒美学品类。
+    </p>
+    <div class="section-source">
+      来源：<a href="https://www.creativeboom.com/news/why-love-ignored-the-whisky-rulebook-to-rebrand-a-tasmanian-distiller/">Creative Boom · LOVE rebrands LARK</a>
+    </div>
+  </section>
+
+  <div class="section-divider">· · ·</div>
+
+  <!-- 贰知 -->
+  <section class="section">
+    <div class="section-label">
+      <span class="numeral">贰</span>
+      <span class="title">知</span>
+      <span class="title-divider"></span>
+    </div>
+    <div class="section-image">
+      <img src="images/02-erzhi.png" alt="OpenAI Workspace Agents" />
+    </div>
+    <p class="section-body">
+      OpenAI 正式向 Business 和 Enterprise 用户开放「Workspace Agent」——可以在云端自主执行任务的 AI 代理。与之前的 GPTs 不同，Workspace Agent 不是聊天机器人，而是工作流执行者：它可以从网页搜集产品反馈，整理后在 Slack 发报告，再到 Gmail 里草拟跟进行邮件。每个 Agent 可在团队内共享，一次构建、持续迭代。这标志着 AI 从「你问它答」进入「你定目标、它去执行」的阶段。
+    </p>
+    <div class="section-source">
+      来源：<a href="https://www.theverge.com/ai-artificial-intelligence/917065/openai-chatgpt-workspace-agents-custom-teams-bots">The Verge · OpenAI Workspace Agents</a>
+    </div>
+  </section>
+
+  <div class="section-divider">· · ·</div>
+
+  <!-- 叁赏 -->
+  <section class="section">
+    <div class="section-label">
+      <span class="numeral">叁</span>
+      <span class="title">赏</span>
+      <span class="title-divider"></span>
+    </div>
+    <div class="section-image">
+      <img src="images/03-sanshang.jpg" alt="Aleph Geddis Chiseled Wood Sculptures" />
+    </div>
+    <p class="section-body">
+      美国雕塑家 Aleph Geddis 的手工木雕让人联想到外星生物、原始图腾和未来主义的奇异融合。他用凿子一刀一刀在胡桃木和枫木上切割出尖锐而流畅的几何形态，每件作品都保留着清晰的手工痕迹。这些雕塑游走在抽象与具象之间：你可以看到一个面具、一个字母、一具骨架——也可以什么都看不到，只有力的节奏。目前在芝加哥 EXPO 2026 展出。
+    </p>
+    <div class="section-source">
+      来源：<a href="https://www.thisiscolossal.com/2026/04/aleph-geddis-chiseled-wood-sculptures/">Colossal · Aleph Geddis</a>
+    </div>
+  </section>
+
+  <!-- 肆律 -->
+  <div class="principle-block">
+    <div class="section-label" style="margin-bottom:12px;">
+      <span class="numeral" style="font-size:22px;">肆</span>
+      <span class="title" style="font-size:17px;">律</span>
+      <span class="title-divider"></span>
+    </div>
+    <div class="principle-title">约束即创意燃料</div>
+    <p class="principle-body">
+      优秀设计的共同特征不是无拘无束的自由，而是对约束的巧妙回应。预算、时间、媒介、文化语境——这些看似限制创造力的因素，恰恰是创意的催化剂。当你被框在一个盒子里，你才会真正思考盒子里还能装下什么。
+    </p>
+  </div>
+
+  <!-- 伍言 -->
+  <div class="quote-block">
+    <div class="section-label" style="justify-content:center;margin-bottom:16px;">
+      <span class="numeral" style="font-size:18px;">伍</span>
+      <span class="title" style="font-size:15px;">言</span>
+    </div>
+    <div class="quote-text">
+      <div class="quote-text-cn">「少，却更好。」</div>
+      <div class="quote-text-en">"Less, but better."</div>
+    </div>
+    <div class="quote-attribution">
+      <strong>Dieter Rams</strong> · 迪特·拉姆斯<br/>
+      <span class="en-name">German Industrial Designer</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span class="footer-left">每日灵感 · 由 Claude Code 自动生成</span>
+    <span class="footer-right">v1.0</span>
+  </div>
+
+</div>
+
+</body>
+</html>
