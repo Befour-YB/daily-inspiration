@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import urllib.request
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 # ── 配置 ──
@@ -15,7 +16,7 @@ DINGTALK_TOKEN = os.environ.get("DINGTALK_TOKEN", "")
 DINGTALK_WEBHOOK = f"https://oapi.dingtalk.com/robot/send?access_token={DINGTALK_TOKEN}"
 CHINA_TZ = timezone(timedelta(hours=8))
 TODAY = datetime.now(CHINA_TZ)
-VERSION = "v1.0"
+VERSION = "v1.1"
 
 
 def log(msg):
@@ -58,6 +59,13 @@ def search_web(query, max_results=5):
     except Exception as e:
         log(f"搜索失败 [{query[:40]}]: {e}")
         return []
+
+
+def proxy_image(url):
+    """走 weserv.nl 代理，绕防盗链."""
+    if not url:
+        return url
+    return f"https://images.weserv.nl/?url={urllib.parse.quote(url, safe='')}"
 
 
 def extract_og_image(article_url):
@@ -115,8 +123,9 @@ def search_with_images(section_name, queries, max_items=3):
             url = r.get("href", "")
             if not url or not url.startswith("http"):
                 continue
-            # 跳过已知的无图站点
-            if "itsnicethat.com" in url:
+            # 跳过已知无图/低质站点
+            skip_domains = []
+            if any(d in url for d in skip_domains):
                 continue
             img = extract_og_image(url)
             if img:
@@ -124,7 +133,7 @@ def search_with_images(section_name, queries, max_items=3):
                     "title": r.get("title", "").strip(),
                     "url": url,
                     "snippet": r.get("body", "").strip(),
-                    "image": img,
+                    "image": proxy_image(img),
                 })
                 log(f"{section_name} ✅ {candidates[-1]['title'][:40]}...")
     return candidates
@@ -316,8 +325,9 @@ def main():
         for section, articles in found_articles.items():
             prompt += f"### {section}\n"
             for a in articles:
-                prompt += f"- {a['title']}\n  {a['url']}\n  {a['snippet'][:200]}\n"
+                prompt += f"- 标题：{a['title']}\n  来源：{a['url']}\n  配图：{a['image']}\n  摘要：{a['snippet'][:200]}\n"
             prompt += "\n"
+        prompt += "**重要：每条内容的 image 字段必须使用上面提供的对应配图 URL，不要编造。**\n"
     else:
         prompt = f"""请撰写今日的「每日灵感」日报（{TODAY.strftime('%Y.%m.%d')}）。
 
@@ -360,13 +370,21 @@ def main():
         print(ai_output[:500])
         sys.exit(1)
 
-    # 6. 覆盖配图为已验证的 og:image（不信任 AI 生成的图片 URL）
+    # 6. 智能匹配图片（AI 写了哪篇文章就用哪张图）
     for k in ("壹观", "贰知", "叁赏"):
-        if k in sections and found_articles.get(k) and found_articles[k][0].get("image"):
-            sections[k]["image"] = found_articles[k][0]["image"]
-        if k in sections and not sections[k].get("url"):
-            if found_articles.get(k):
-                sections[k]["url"] = found_articles[k][0]["url"]
+        articles = found_articles.get(k, [])
+        if not articles:
+            continue
+        ai_url = sections.get(k, {}).get("url", "")
+        # 按 URL 精确匹配
+        matched = next((a for a in articles if a["url"] == ai_url), None)
+        if not matched:
+            matched = articles[0]  # fallback
+        # AI 的图如果不是我们代理过的，用匹配到的替代
+        if "weserv.nl" not in (sections.get(k, {}).get("image") or ""):
+            sections[k]["image"] = matched["image"]
+        if not sections.get(k, {}).get("url"):
+            sections[k]["url"] = matched["url"]
 
     # 7. 组装并发送
     markdown = assemble_markdown(sections, found_articles)

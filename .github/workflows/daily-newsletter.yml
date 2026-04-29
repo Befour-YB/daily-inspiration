@@ -6,6 +6,10 @@ on:
     - cron: '30 1 * * 1-5'
   workflow_dispatch:  # 支持手动触发测试
 
+concurrency:
+  group: daily-inspiration
+  cancel-in-progress: true
+
 jobs:
   generate:
     runs-on: ubuntu-latest
