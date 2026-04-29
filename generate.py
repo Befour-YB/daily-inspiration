@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.request
 from datetime import datetime, timezone, timedelta
 
@@ -49,11 +50,11 @@ def is_working_day():
 
 
 def search_web(query, max_results=5):
-    """DuckDuckGo 搜索（GitHub Actions 海外节点，无需代理）."""
+    """DuckDuckGo 搜索（用 HTML 后端，兼容 Actions 环境）."""
     try:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
-            return list(ddgs.text(query, max_results=max_results))
+            return list(ddgs.text(query, max_results=max_results, backend="html"))
     except Exception as e:
         log(f"搜索失败 [{query[:40]}]: {e}")
         return []
@@ -290,7 +291,8 @@ def main():
     if missing:
         log(f"⚠️ {', '.join(missing)} 缺少有图文章，尝试补充搜索")
         for k in missing:
-            backup_q = [f"{['品牌设计','AI 工具','艺术设计']['壹观贰知叁赏'.index(k)]} 2026 inspiration"]
+            fallback_map = {"壹观": "品牌设计", "贰知": "AI 工具", "叁赏": "艺术设计"}
+            backup_q = [f"{fallback_map.get(k, 'design')} 2026 inspiration"]
             found_articles[k] = search_with_images(k, backup_q)
             if not found_articles[k]:
                 log(f"❌ {k} 实在找不到有图文章，发送简化版")
