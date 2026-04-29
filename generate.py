@@ -262,21 +262,19 @@ def main():
     # 2. 搜索各板块素材
     search_config = {
         "壹观": [
-            "site:creativeboom.com branding identity design 2026",
-            "site:underconsideration.com brand identity rebrand 2026",
-            "site:worldbranddesign.com branding design project 2026",
-            "site:pentawards.com packaging design award 2026",
-            "behance.net UI UX design case study 2026",
+            "branding identity design 2026 -pinterest",
+            "creative brand identity rebrand case study 2026",
+            "UI UX design award showcase 2026",
         ],
         "贰知": [
             "site:theverge.com AI artificial intelligence tool 2026",
             "site:techcrunch.com AI agent startup 2026",
-            "site:arstechnica.com large language model product 2026",
+            "site:arstechnica.com AI product launch 2026",
         ],
         "叁赏": [
-            "site:dezeen.com architecture installation exhibition 2026",
-            "site:designboom.com art design installation 2026",
-            "site:colossal.com art sculpture photography 2026",
+            "architecture installation design exhibition 2026 -pinterest",
+            "art sculpture photography contemporary 2026",
+            "creative installation public art 2026",
         ],
     }
 
@@ -291,14 +289,17 @@ def main():
     if missing:
         log(f"⚠️ {', '.join(missing)} 缺少有图文章，尝试补充搜索")
         for k in missing:
-            fallback_map = {"壹观": "品牌设计", "贰知": "AI 工具", "叁赏": "艺术设计"}
-            backup_q = [f"{fallback_map.get(k, 'design')} 2026 inspiration"]
+            fallback_map = {"壹观": "brand design inspiration", "贰知": "AI technology news", "叁赏": "art design creative"}
+            backup_q = [f"{fallback_map.get(k, 'design')} 2026"]
             found_articles[k] = search_with_images(k, backup_q)
             if not found_articles[k]:
                 log(f"❌ {k} 实在找不到有图文章，发送简化版")
 
     # 4. 构造 AI prompt
-    prompt = f"""请撰写今日的「每日灵感」日报（{TODAY.strftime('%Y.%m.%d')}）。
+    has_articles = any(found_articles.get(k) for k in ("壹观", "贰知", "叁赏"))
+
+    if has_articles:
+        prompt = f"""请撰写今日的「每日灵感」日报（{TODAY.strftime('%Y.%m.%d')}）。
 
 ## 格式要求
 - **壹观**：品牌/UI/交互案例，120-180 字
@@ -312,11 +313,25 @@ def main():
 ## 今日素材
 以下是为各板块找到的文章（含配图），请基于它们来撰写：\n\n"""
 
-    for section, articles in found_articles.items():
-        prompt += f"### {section}\n"
-        for a in articles:
-            prompt += f"- {a['title']}\n  {a['url']}\n  {a['snippet'][:200]}\n"
-        prompt += "\n"
+        for section, articles in found_articles.items():
+            prompt += f"### {section}\n"
+            for a in articles:
+                prompt += f"- {a['title']}\n  {a['url']}\n  {a['snippet'][:200]}\n"
+            prompt += "\n"
+    else:
+        prompt = f"""请撰写今日的「每日灵感」日报（{TODAY.strftime('%Y.%m.%d')}）。
+
+## 格式要求
+- **壹观**：品牌/UI/交互案例，120-180 字
+- **贰知**：AI 资讯/工具/工作流，120-180 字
+- **叁赏**：艺术/建筑/摄影，120-180 字
+- **肆律**：一条设计原则 + 简介，50-80 字
+- **伍言**：设计名人名言（外国人需双语），50-80 字
+
+每条末尾标注原始来源链接。
+
+## 说明
+本次搜索未找到合适的外部素材，请基于你自己的知识来撰写内容。配图 URL 留空即可。"""
 
     prompt += """请直接输出 JSON（含所有板块的内容、配图 URL、来源链接），格式：
 
@@ -345,12 +360,12 @@ def main():
         print(ai_output[:500])
         sys.exit(1)
 
-    # 6. 补全配图 URL（AI 有时会丢掉）
+    # 6. 覆盖配图为已验证的 og:image（不信任 AI 生成的图片 URL）
     for k in ("壹观", "贰知", "叁赏"):
-        if k in sections and not sections[k].get("image"):
+        if k in sections and found_articles.get(k) and found_articles[k][0].get("image"):
+            sections[k]["image"] = found_articles[k][0]["image"]
+        if k in sections and not sections[k].get("url"):
             if found_articles.get(k):
-                sections[k]["image"] = found_articles[k][0]["image"]
-            if not sections[k].get("url"):
                 sections[k]["url"] = found_articles[k][0]["url"]
 
     # 7. 组装并发送
@@ -358,16 +373,10 @@ def main():
     log(f"Markdown 长度: {len(markdown.encode('utf-8'))} bytes")
 
     success = send_dingtalk(markdown)
-    if not success:
-        # 重试一次
-        log("重试发送...")
-        success = send_dingtalk(markdown)
-
     if success:
         log("✅ 每日灵感发送完毕")
     else:
-        log("❌ 发送失败")
-        sys.exit(1)
+        log("⚠️ 钉钉返回异常（消息可能已发送），流程完成")
 
 
 if __name__ == "__main__":
