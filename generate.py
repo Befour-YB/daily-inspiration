@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""每日灵感 v1.4 — 精简版：提取 og:image → wsrv.nl 代理 → 钉钉"""
+"""每日灵感 v1.5 — 白名单模式：仅从信任站点取内容"""
 
 import json, os, re, subprocess, sys, time, urllib.request, urllib.parse
 from datetime import datetime, timezone, timedelta
@@ -89,18 +89,26 @@ def proxy_url(raw_url):
     return raw_url
 
 
-SKIP_DOMAINS = {
-    "time.geekbang.org", "geekbang.org",  # 极客时间 - 卖课广告
-    "wikipedia.org", "wikimedia.org",     # 维基百科 - 图文对应关系混乱
-    "kaiyanapp.com",                      # 开眼 - 广告居多
-    "iqiyi.com", "youku.com", "bilibili.com",  # 视频平台非资讯
-    "zhihu.com",          # 知乎 - 良莠不齐
-    "xiaohongshu.com",   # 小红书
-    "zcool.com.cn",       # 站酷 - og:image 不稳定
-    "ui.cn",              # UI中国 - 同上
+# 白名单 — 按板块划分，只从这些站点取内容
+TRUSTED_DOMAINS = {
+    "壹观": [  # 品牌创意
+        "behance.net", "dribbble.com",
+        "underconsideration.com", "itsnicethat.com", "creativeboom.com",
+        "zcool.com.cn",
+        "logonews.cn", "identitydesigned.com", "bpando.org",
+        "awwwards.com",
+    ],
+    "贰知": [  # AI 资讯
+        "theverge.com", "techcrunch.com", "arstechnica.com",
+        "36kr.com", "the-decoder.com",
+    ],
+    "叁赏": [  # 艺术作品
+        "dezeen.com", "archdaily.com", "designboom.com",
+        "thisiscolossal.com", "gooood.cn",
+    ],
 }
 
-def search_with_images(section, queries, needed=3):
+def search_with_images(section, queries, trusted_domains, needed=3):
     candidates = []
     for q in queries:
         if len(candidates) >= needed:
@@ -111,9 +119,9 @@ def search_with_images(section, queries, needed=3):
             url = r.get("href", "")
             if not url.startswith("http"):
                 continue
-            # 过滤课程/广告/视频类站点
+            # 白名单模式：只保留信任站点
             domain = urllib.parse.urlparse(url).netloc.lower()
-            if any(d in domain for d in SKIP_DOMAINS):
+            if not any(d in domain for d in trusted_domains):
                 continue
             img = extract_best_image(url)
             if img:
@@ -282,8 +290,10 @@ def main():
         return
 
     search_config = {
-        "壹观": [
+        "壹观": [  # 品牌创意 + 包装/logo 案例
             "branding rebrand identity design case study",
+            "packaging design award label brand",
+            "logo redesign brand identity case study",
             "UI UX design award showcase inspiration",
             "site:behance.net brand identity design",
             "site:underconsideration.com brand",
@@ -305,7 +315,7 @@ def main():
     found = {}
     for sec, queries in search_config.items():
         log(f"搜索 {sec}...")
-        found[sec] = search_with_images(sec, queries)
+        found[sec] = search_with_images(sec, queries, TRUSTED_DOMAINS.get(sec, []))
         log(f"  → {len(found[sec])} 篇有图")
         time.sleep(2)  # 避免 DDG 限流
 
@@ -314,7 +324,7 @@ def main():
         log(f"⚠️ {', '.join(missing)} 缺图，补搜")
         backup = {"壹观": "品牌 设计 案例", "贰知": "AI 人工智能 资讯", "叁赏": "建筑 设计 艺术"}
         for k in missing:
-            found[k] = search_with_images(k, [f"{backup[k]} 2026"], needed=1)
+            found[k] = search_with_images(k, [f"{backup[k]} 2026"], TRUSTED_DOMAINS.get(k, []), needed=1)
 
     # 构造 prompt
     prompt = f"撰写今日「每日灵感」日报 ({TODAY.strftime('%Y.%m.%d')})。\n\n"
