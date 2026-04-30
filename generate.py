@@ -1,58 +1,37 @@
 #!/usr/bin/env python3
-"""每日灵感 v1.0 — GitHub Actions 自动化生成器"""
+"""每日灵感 v1.3 — GitHub Actions 自动化生成器（本地图片存储）"""
 
-import json
-import os
-import re
-import subprocess
-import sys
-import urllib.request
-import urllib.parse
+import json, os, re, subprocess, sys, urllib.request, urllib.parse, glob
 from datetime import datetime, timezone, timedelta
 
 # ── 配置 ──
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DINGTALK_TOKEN = os.environ.get("DINGTALK_TOKEN", "")
 DINGTALK_WEBHOOK = f"https://oapi.dingtalk.com/robot/send?access_token={DINGTALK_TOKEN}"
+REPO_OWNER = os.environ.get("REPO_OWNER", "Befour-YB")
+REPO_NAME = os.environ.get("REPO_NAME", "daily-inspiration")
+BRANCH = os.environ.get("BRANCH", "main")
+RAW_BASE = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}"
+IMAGES_DIR = "images"
 CHINA_TZ = timezone(timedelta(hours=8))
 TODAY = datetime.now(CHINA_TZ)
-VERSION = "v1.2"
-FULL_RUN_UNTIL = datetime(2026, 5, 6, tzinfo=CHINA_TZ)  # 5/6 及之前每天发
+VERSION = "v1.3"
+FULL_RUN_UNTIL = datetime(2026, 5, 6, tzinfo=CHINA_TZ)
 
 
 def log(msg):
-    t = TODAY.strftime("%H:%M:%S")
-    print(f"[{t}] {msg}")
+    print(f"[{TODAY.strftime('%H:%M:%S')}] {msg}")
 
 
-def run(cmd, timeout=20):
-    """Run a shell command and return stdout."""
+def run(cmd, timeout=30):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     return r.stdout.strip()
 
 
-def is_working_day():
-    """检查今天是否中国法定工作日."""
-    date_str = TODAY.strftime("%Y-%m-%d")
-    url = f"https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{TODAY.year}.json"
-    try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-        for day in data.get("days", []):
-            if day.get("date") == date_str:
-                is_off = day.get("isOffDay", False)
-                log(f"节假日数据: {date_str} isOffDay={is_off} name={day.get('name','')}")
-                return not is_off
-        log(f"{date_str} 不在节假日列表中，回退 weekday 检查")
-        return TODAY.weekday() < 5
-    except Exception as e:
-        log(f"节假日 API 异常: {e}，回退 weekday 检查")
-        return TODAY.weekday() < 5
-
+# ── 搜索 ──
 
 def search_web(query, max_results=5):
-    """DuckDuckGo 搜索（用 HTML 后端，兼容 Actions 环境）."""
+    """DuckDuckGo 搜索."""
     try:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
@@ -62,87 +41,90 @@ def search_web(query, max_results=5):
         return []
 
 
-def proxy_image(url):
-    """走图片代理绕防盗链。wsrv.nl 优先，weserv.nl 兜底."""
-    if not url:
-        return url
-    encoded = urllib.parse.quote(url, safe='')
-    return f"https://wsrv.nl/?url={encoded}"
+# ── 图片：带 Referer 下载到本地 → GitHub Raw URL ──
+
+def download_image(img_url, article_url):
+    """用 Referer 绕过防盗链下载原图到 images/，返回 raw.githubusercontent.com URL."""
+    os.makedirs(IMAGES_DIR, exist_ok=True)
+    date_str = TODAY.strftime("%Y-%m-%d")
+    # 先用 HEAD 拿 content-type 决定扩展名
+    ct = run(["curl", "-sI", "-o", "/dev/null", "-w", "%{content_type}",
+              "-e", article_url, "--connect-timeout", "5", img_url])
+    ext = "jpg"
+    if "png" in ct:  ext = "png"
+    elif "webp" in ct: ext = "webp"
+    elif "gif" in ct: ext = "gif"
+    elif "svg" in ct: ext = "svg"
+    # 避免文件名冲突
+    ts = datetime.now(CHINA_TZ).strftime("%H%M%S")
+    fname = f"{date_str}-{ts}.{ext}"
+    filepath = f"{IMAGES_DIR}/{fname}"
+    # 下载
+    code = run(["curl", "-sL", "-o", filepath, "-w", "%{http_code}",
+                "-e", article_url, "--connect-timeout", "15", img_url])
+    if code != "200":
+        run(["rm", "-f", filepath])
+        return None
+    size = os.path.getsize(filepath)
+    if size < 1024:  # 太小，不是真图
+        run(["rm", "-f", filepath])
+        return None
+    mime = run(["file", "-b", "--mime-type", filepath])
+    if not mime.startswith("image/"):
+        run(["rm", "-f", filepath])
+        return None
+    log(f"  📷 {fname} ({size//1024}KB)")
+    return f"{RAW_BASE}/{IMAGES_DIR}/{fname}"
 
 
-def extract_og_image(article_url):
-    """从文章 HTML 中提取 og:image，并验证图片可达."""
+def extract_og_urls(article_url):
+    """提取文章 og:image / twitter:image URL 列表."""
+    urls = []
     try:
         html = run(["curl", "-sL", "--connect-timeout", "10", article_url])
         if not html:
-            return None
-
-        # og:image
-        m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html, re.IGNORECASE)
-        if m:
+            return urls
+    except Exception:
+        return urls
+    for pattern in [r'<meta\s+property="og:image"\s+content="([^"]+)"',
+                    r'<meta\s+name="twitter:image"\s+content="([^"]+)"']:
+        for m in re.finditer(pattern, html, re.IGNORECASE):
             img = m.group(1).replace("&amp;", "&")
-            if "social" not in img:
-                code = run(["curl", "-sL", "-o", "/dev/null", "-w", "%{http_code}",
-                           "--connect-timeout", "5", img])
-                if code == "200":
-                    return img
-
-        # twitter:image
-        m = re.search(r'<meta\s+name="twitter:image"\s+content="([^"]+)"', html, re.IGNORECASE)
-        if m:
-            img = m.group(1).replace("&amp;", "&")
-            code = run(["curl", "-sL", "-o", "/dev/null", "-w", "%{http_code}",
-                       "--connect-timeout", "5", img])
-            if code == "200":
-                return img
-
-        # 正文首张大图（>600px）
-        m = re.search(r'<img[^>]+src="([^"]+)"[^>]*(?:width="([^"]+)")?', html)
-        if m:
-            img = m.group(1)
-            if img.startswith("http") and "logo" not in img.lower():
-                code = run(["curl", "-sL", "-o", "/dev/null", "-w", "%{http_code}",
-                           "--connect-timeout", "5", img])
-                if code == "200":
-                    return img
-
-        return None
-    except Exception as e:
-        log(f"取图失败 [{article_url[:60]}]: {e}")
-        return None
+            if img.startswith("http") and "social" not in img.lower() and "logo" not in img.lower():
+                urls.append(img)
+    return urls
 
 
-def search_with_images(section_name, queries, max_items=3):
-    """搜索某板块文章，直到凑齐指定数量的有图结果."""
+def search_with_images(section, queries, needed=3):
+    """搜索并下载图片，返回已拿到 GitHub Raw URL 的文章列表."""
     candidates = []
     for q in queries:
-        if len(candidates) >= max_items:
+        if len(candidates) >= needed:
             break
-        results = search_web(q, max_results=5)
-        for r in results:
-            if len(candidates) >= max_items:
+        for r in search_web(q, max_results=5):
+            if len(candidates) >= needed:
                 break
             url = r.get("href", "")
-            if not url or not url.startswith("http"):
+            if not url.startswith("http"):
                 continue
-            # 跳过已知无图/低质站点
-            skip_domains = []
-            if any(d in url for d in skip_domains):
-                continue
-            img = extract_og_image(url)
-            if img:
-                candidates.append({
-                    "title": r.get("title", "").strip(),
-                    "url": url,
-                    "snippet": r.get("body", "").strip(),
-                    "image": proxy_image(img),
-                })
-                log(f"{section_name} ✅ {candidates[-1]['title'][:40]}...")
+            img_urls = extract_og_urls(url)
+            for img_url in img_urls:
+                local_url = download_image(img_url, url)
+                if local_url:
+                    candidates.append({
+                        "title": r.get("title", "").strip(),
+                        "url": url,
+                        "snippet": r.get("body", "").strip(),
+                        "image": local_url,
+                    })
+                    log(f"{section} ✅ {candidates[-1]['title'][:50]}")
+                    break  # 这篇文章拿到图了，换下一篇
     return candidates
 
 
+# ── DeepSeek ──
+
 def call_deepseek(prompt):
-    """调用 DeepSeek API 生成日报内容."""
     payload = json.dumps({
         "model": "deepseek-chat",
         "messages": [
@@ -152,69 +134,53 @@ def call_deepseek(prompt):
         "temperature": 0.7,
         "max_tokens": 2000,
     }).encode()
-
     req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=payload)
     req.add_header("Content-Type", "application/json")
     req.add_header("Authorization", f"Bearer {DEEPSEEK_API_KEY}")
-
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode())
-            return data["choices"][0]["message"]["content"]
+            return json.loads(resp.read().decode())["choices"][0]["message"]["content"]
     except Exception as e:
         log(f"DeepSeek 调用失败: {e}")
         return None
 
 
 def parse_newsletter(ai_output):
-    """从 AI 输出中解析出结构化内容."""
-    # 尝试从 ```json ... ``` 中提取
     m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', ai_output, re.DOTALL)
     if m:
-        try:
-            return json.loads(m.group(1))
-        except json.JSONDecodeError:
-            pass
-    # 直接尝试解析整个输出
-    try:
-        return json.loads(ai_output)
-    except json.JSONDecodeError:
-        log("AI 输出不是标准 JSON，尝试构造结构化数据")
-        return None
+        try: return json.loads(m.group(1))
+        except json.JSONDecodeError: pass
+    try: return json.loads(ai_output)
+    except json.JSONDecodeError: return None
 
+
+# ── Markdown 组装 ──
 
 def assemble_markdown(sections, articles):
-    """组装钉钉 Markdown 消息."""
     now_str = TODAY.strftime("%Y.%m.%d")
     lines = [f"# 🎨 每日灵感 {now_str}\n"]
-
-    section_config = [
+    config = [
         ("壹观", "品牌 / UI / 创意案例"),
         ("贰知", "AI 资讯 / 工具 / 工作流"),
         ("叁赏", "艺术 / 建筑 / 摄影 / 作品"),
         ("肆律", "设计原则"),
         ("伍言", "名人名言"),
     ]
-
-    for key, subtitle in section_config:
+    for key, subtitle in config:
         item = sections.get(key, {})
         content = item.get("content", "")
         title = item.get("title", "")
-
         lines.append(f"## {key} · {subtitle}")
         if title:
             lines.append(f"**{title}**")
-
-        # 前 3 条带配图
         if key in ("壹观", "贰知", "叁赏"):
             img = item.get("image", "")
-            art = next((a for a in articles.get(key, []) if a.get("image")), None)
-            img = img or (art["image"] if art else "")
+            if not img:
+                art = next((a for a in articles.get(key, []) if a.get("image")), None)
+                img = art["image"] if art else ""
             if img:
                 lines.append(f"![]({img})")
-
         lines.append(content)
-
         url = item.get("url", "")
         if not url:
             art = next((a for a in articles.get(key, []) if a.get("url")), None)
@@ -222,42 +188,66 @@ def assemble_markdown(sections, articles):
         if url:
             lines.append(f"[📎 原始案例]({url})")
         lines.append("")
-
     lines.append(f"---\n*每日灵感 {VERSION} · 工作日 9:30 自动发送*")
     return "\n".join(lines)
 
 
+# ── 钉钉发送 ──
+
 def send_dingtalk(text):
-    """发送 Markdown 到钉钉群."""
     payload_bytes = text.encode("utf-8")
     if len(payload_bytes) > 3500:
         log(f"内容过长 ({len(payload_bytes)} bytes)，截断")
         text = payload_bytes[:3400].decode("utf-8", errors="ignore")
         text = text[:text.rfind("\n")] + "\n\n*（内容截断）*"
-
     body = json.dumps({
         "msgtype": "markdown",
-        "markdown": {
-            "title": f"每日灵感 {TODAY.strftime('%Y.%m.%d')}",
-            "text": text,
-        },
+        "markdown": {"title": f"每日灵感 {TODAY.strftime('%Y.%m.%d')}", "text": text},
     }).encode()
-
     req = urllib.request.Request(DINGTALK_WEBHOOK, data=body)
     req.add_header("Content-Type", "application/json")
-
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode())
             if result.get("errcode") == 0:
                 log("✅ 钉钉发送成功")
                 return True
-            else:
-                log(f"❌ 钉钉返回错误: {result}")
-                return False
+            log(f"❌ 钉钉返回: {result}")
+            return False
     except Exception as e:
         log(f"❌ 钉钉请求异常: {e}")
         return False
+
+
+# ── Git 操作 ──
+
+def git_push_images():
+    """提交并推送下载的图片到 GitHub."""
+    new_files = run(["git", "ls-files", "--others", "--exclude-standard", IMAGES_DIR])
+    modified = run(["git", "diff", "--name-only", "--", IMAGES_DIR])
+    if not new_files and not modified:
+        return  # 没有新图片
+    run(["git", "add", IMAGES_DIR])
+    date_str = TODAY.strftime("%Y-%m-%d")
+    run(["git", "commit", "-m", f"daily: {date_str} images", "--allow-empty"])
+    r = subprocess.run(["git", "push"], capture_output=True, text=True)
+    if r.returncode == 0:
+        log("✅ 图片已推送到 GitHub")
+    else:
+        log(f"⚠️ 图片推送失败: {r.stderr[:200]}")
+
+
+def cleanup_old_images():
+    """清理 30 天前的旧图片."""
+    cutoff = TODAY - timedelta(days=30)
+    for f in glob.glob(f"{IMAGES_DIR}/*"):
+        try:
+            mtime = datetime.fromtimestamp(os.path.getmtime(f))
+            if mtime < cutoff:
+                os.remove(f)
+                log(f"🗑 清理旧图: {f}")
+        except Exception:
+            pass
 
 
 # ── 主流程 ──
@@ -265,14 +255,14 @@ def send_dingtalk(text):
 def main():
     log(f"=== 每日灵感 {TODAY.strftime('%Y.%m.%d')} ===")
 
-    # 1. 检查是否该发：5/6 及之前每天发，5/7 起仅工作日
+    # 1. 工作日检查
     if TODAY <= FULL_RUN_UNTIL:
-        log(f"每日全发模式 ({FULL_RUN_UNTIL.strftime('%m/%d')} 前)")
+        log(f"每日全发模式 (至 {FULL_RUN_UNTIL.strftime('%m/%d')})")
     elif not is_working_day():
         log("今天非工作日，跳过")
         return
 
-    # 2. 搜索各板块素材
+    # 2. 搜索 + 下载图片
     search_config = {
         "壹观": [
             "branding identity design 2026 -pinterest",
@@ -297,22 +287,21 @@ def main():
         found_articles[section] = search_with_images(section, queries)
         log(f"  → 找到 {len(found_articles[section])} 篇有图文章")
 
-    # 3. 检查配图完整性（前 3 条必须全有图）
+    # 3. 补搜
     missing = [k for k in ("壹观", "贰知", "叁赏") if not found_articles.get(k)]
     if missing:
-        log(f"⚠️ {', '.join(missing)} 缺少有图文章，尝试补充搜索")
+        log(f"⚠️ {', '.join(missing)} 缺图，补搜")
+        backup = {"壹观": "brand design", "贰知": "AI technology", "叁赏": "art design"}
         for k in missing:
-            fallback_map = {"壹观": "brand design inspiration", "贰知": "AI technology news", "叁赏": "art design creative"}
-            backup_q = [f"{fallback_map.get(k, 'design')} 2026"]
-            found_articles[k] = search_with_images(k, backup_q)
+            found_articles[k] = search_with_images(k, [f"{backup[k]} 2026"], needed=1)
             if not found_articles[k]:
-                log(f"❌ {k} 实在找不到有图文章，发送简化版")
+                log(f"❌ {k} 实在找不到有图文章")
 
-    # 4. 构造 AI prompt
-    has_articles = any(found_articles.get(k) for k in ("壹观", "贰知", "叁赏"))
+    # 4. 推送图片到 GitHub（提前推，确保 raw URL 可用）
+    git_push_images()
 
-    if has_articles:
-        prompt = f"""请撰写今日的「每日灵感」日报（{TODAY.strftime('%Y.%m.%d')}）。
+    # 5. 构造 AI prompt
+    prompt = f"""请撰写今日的「每日灵感」日报（{TODAY.strftime('%Y.%m.%d')}）。
 
 ## 格式要求
 - **壹观**：品牌/UI/交互案例，120-180 字
@@ -320,61 +309,52 @@ def main():
 - **叁赏**：艺术/建筑/摄影，120-180 字
 - **肆律**：一条设计原则 + 简介，50-80 字
 - **伍言**：设计名人名言（外国人需双语），50-80 字
-
 每条末尾标注原始来源链接。
 
 ## 今日素材
-以下是为各板块找到的文章（含配图），请基于它们来撰写：\n\n"""
+以下是为各板块找到的文章（配图已托管在 GitHub，URL 可直接用）：\n\n"""
 
-        for section, articles in found_articles.items():
-            prompt += f"### {section}\n"
+    has_articles = False
+    for section, articles in found_articles.items():
+        prompt += f"### {section}\n"
+        if articles:
+            has_articles = True
             for a in articles:
                 prompt += f"- 标题：{a['title']}\n  来源：{a['url']}\n  配图：{a['image']}\n  摘要：{a['snippet'][:200]}\n"
-            prompt += "\n"
-        prompt += "**重要：每条内容的 image 字段必须使用上面提供的对应配图 URL，不要编造。**\n"
-    else:
-        prompt = f"""请撰写今日的「每日灵感」日报（{TODAY.strftime('%Y.%m.%d')}）。
+        else:
+            prompt += "（请基于你的知识撰写）\n"
+        prompt += "\n"
 
-## 格式要求
-- **壹观**：品牌/UI/交互案例，120-180 字
-- **贰知**：AI 资讯/工具/工作流，120-180 字
-- **叁赏**：艺术/建筑/摄影，120-180 字
-- **肆律**：一条设计原则 + 简介，50-80 字
-- **伍言**：设计名人名言（外国人需双语），50-80 字
-
-每条末尾标注原始来源链接。
-
-## 说明
-本次搜索未找到合适的外部素材，请基于你自己的知识来撰写内容。配图 URL 留空即可。"""
+    if has_articles:
+        prompt += "**重要：每条内容的 image 字段必须使用上面提供的对应配图 URL，严禁编造。**\n"
 
     prompt += """请直接输出 JSON（含所有板块的内容、配图 URL、来源链接），格式：
 
 ```json
 {
-  "壹观": {"title": "案例标题", "content": "正文...", "image": "https://...", "url": "https://..."},
-  "贰知": {"title": "案例标题", "content": "正文...", "image": "https://...", "url": "https://..."},
-  "叁赏": {"title": "案例标题", "content": "正文...", "image": "https://...", "url": "https://..."},
+  "壹观": {"title": "案例标题", "content": "正文...", "image": "https://raw.githubusercontent.com/...", "url": "https://..."},
+  "贰知": {"title": "案例标题", "content": "正文...", "image": "https://raw.githubusercontent.com/...", "url": "https://..."},
+  "叁赏": {"title": "案例标题", "content": "正文...", "image": "https://raw.githubusercontent.com/...", "url": "https://..."},
   "肆律": {"content": "设计原则+简介", "url": "https://..."},
   "伍言": {"content": "名人名言（双语）", "url": "https://..."}
 }
 ```"""
 
-    # 5. 调用 DeepSeek
+    # 6. 调用 DeepSeek
     log("调用 DeepSeek 生成内容...")
     ai_output = call_deepseek(prompt)
     if not ai_output:
-        log("❌ AI 生成失败，终止")
+        log("❌ AI 生成失败")
         sys.exit(1)
     log(f"AI 回复长度: {len(ai_output)} 字符")
 
     sections = parse_newsletter(ai_output)
     if not sections:
         log("❌ 解析 AI 输出失败")
-        log("原始输出:")
         print(ai_output[:500])
         sys.exit(1)
 
-    # 6. 强制使用我们验证过的图片和链接
+    # 7. 强制使用我们下载的图片和链接
     for k in ("壹观", "贰知", "叁赏"):
         articles = found_articles.get(k, [])
         sections.setdefault(k, {})
@@ -382,22 +362,45 @@ def main():
             ai_url = sections[k].get("url", "")
             matched = next((a for a in articles if a["url"] == ai_url), None) or articles[0]
             sections[k]["url"] = matched["url"]
-            if matched["image"]:
+            if matched.get("image"):
                 sections[k]["image"] = matched["image"]
-        # 没有搜到文章时，保留 AI 自己生成的图片 URL，但必须走代理
+        # AI 自生成的图也走一遍下载验证
         ai_img = sections[k].get("image", "")
-        if ai_img and "wsrv.nl" not in ai_img and "weserv.nl" not in ai_img:
-            sections[k]["image"] = proxy_image(ai_img)
+        if ai_img and RAW_BASE not in ai_img:
+            # 尝试下了看看
+            local = download_image(ai_img, sections[k].get("url", ai_img))
+            if local:
+                sections[k]["image"] = local
+                git_push_images()
 
-    # 7. 组装并发送
+    # 8. 组装并发送
     markdown = assemble_markdown(sections, found_articles)
-    log(f"Markdown 长度: {len(markdown.encode('utf-8'))} bytes")
+    log(f"Markdown: {len(markdown.encode('utf-8'))} bytes")
 
-    success = send_dingtalk(markdown)
-    if success:
-        log("✅ 每日灵感发送完毕")
-    else:
-        log("⚠️ 钉钉返回异常（消息可能已发送），流程完成")
+    send_dingtalk(markdown)
+    cleanup_old_images()
+    log("✅ 每日灵感完毕")
+
+
+# ── 复用 ──
+
+def is_working_day():
+    date_str = TODAY.strftime("%Y-%m-%d")
+    url = f"https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{TODAY.year}.json"
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+        for day in data.get("days", []):
+            if day.get("date") == date_str:
+                is_off = day.get("isOffDay", False)
+                log(f"节假日: {date_str} isOffDay={is_off} name={day.get('name','')}")
+                return not is_off
+        log(f"{date_str} 不在节假日列表，回退 weekday 检查")
+        return TODAY.weekday() < 5
+    except Exception as e:
+        log(f"节假日 API 异常: {e}，回退 weekday")
+        return TODAY.weekday() < 5
 
 
 if __name__ == "__main__":

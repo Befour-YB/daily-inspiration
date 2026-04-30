@@ -4,7 +4,7 @@ on:
   schedule:
     # 北京时间 9:30 = UTC 1:30，每天触发（脚本内判断工作日/周末/假期）
     - cron: '30 1 * * *'
-  workflow_dispatch:  # 支持手动触发测试
+  workflow_dispatch:
 
 concurrency:
   group: daily-inspiration
@@ -12,6 +12,9 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: write  # 允许 git push 图片
 
 jobs:
   generate:
@@ -25,6 +28,11 @@ jobs:
 
       - name: 安装依赖
         run: pip install -r requirements.txt
+
+      - name: 配置 Git
+        run: |
+          git config user.name "Daily Inspiration Bot"
+          git config user.email "bot@daily-inspiration.local"
 
       - name: 生成并发送每日灵感
         run: python generate.py
