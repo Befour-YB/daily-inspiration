@@ -43,45 +43,59 @@ def search_web(query, max_results=5):
 
 # ── 图片：带 Referer 下载到本地 → GitHub Raw URL ──
 
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 def download_image(img_url, article_url):
-    """用 Referer 绕过防盗链下载原图到 images/，返回 raw.githubusercontent.com URL."""
+    """伪装浏览器下载原图，多重策略绕防盗链，返回 raw.githubusercontent.com URL."""
     os.makedirs(IMAGES_DIR, exist_ok=True)
     date_str = TODAY.strftime("%Y-%m-%d")
-    # 先用 HEAD 拿 content-type 决定扩展名
-    ct = run(["curl", "-sI", "-o", "/dev/null", "-w", "%{content_type}",
-              "-e", article_url, "--connect-timeout", "5", img_url])
-    ext = "jpg"
-    if "png" in ct:  ext = "png"
-    elif "webp" in ct: ext = "webp"
-    elif "gif" in ct: ext = "gif"
-    elif "svg" in ct: ext = "svg"
-    # 避免文件名冲突
     ts = datetime.now(CHINA_TZ).strftime("%H%M%S")
-    fname = f"{date_str}-{ts}.{ext}"
+    fname = f"{date_str}-{ts}.tmp"  # 先写临时，验证后改名
     filepath = f"{IMAGES_DIR}/{fname}"
-    # 下载
-    code = run(["curl", "-sL", "-o", filepath, "-w", "%{http_code}",
-                "-e", article_url, "--connect-timeout", "15", img_url])
-    if code != "200":
-        run(["rm", "-f", filepath])
-        return None
-    size = os.path.getsize(filepath)
-    if size < 1024:  # 太小，不是真图
-        run(["rm", "-f", filepath])
-        return None
-    mime = run(["file", "-b", "--mime-type", filepath])
-    if not mime.startswith("image/"):
-        run(["rm", "-f", filepath])
-        return None
-    log(f"  📷 {fname} ({size//1024}KB)")
-    return f"{RAW_BASE}/{IMAGES_DIR}/{fname}"
+
+    # 三重策略尝试下载
+    strategies = [
+        # 策略 1：Referer + 浏览器 UA（最像真实访问）
+        ["-H", f"User-Agent: {UA}", "-e", article_url],
+        # 策略 2：仅浏览器 UA（有些站反 Referer）
+        ["-H", f"User-Agent: {UA}"],
+        # 策略 3：裸请求
+        [],
+    ]
+
+    for strat in strategies:
+        cmd = ["curl", "-sL", "-o", filepath, "-w", "%{http_code}",
+               "--connect-timeout", "15"] + strat + [img_url]
+        code = run(cmd)
+        if code != "200":
+            continue
+        size = os.path.getsize(filepath)
+        if size < 4096:  # 小于 4KB 很可能是错误页或占位图
+            continue
+        mime = run(["file", "-b", "--mime-type", filepath])
+        if not mime.startswith("image/"):
+            continue
+
+        # 成功——按实际 mime 类型改名
+        ext = "jpg"
+        if "png" in mime: ext = "png"
+        elif "webp" in mime: ext = "webp"
+        elif "gif" in mime: ext = "gif"
+        elif "svg" in mime: ext = "svg"
+        final = f"{IMAGES_DIR}/{date_str}-{ts}.{ext}"
+        os.rename(filepath, final)
+        log(f"  📷 {os.path.basename(final)} ({size//1024}KB)")
+        return f"{RAW_BASE}/{IMAGES_DIR}/{os.path.basename(final)}"
+
+    run(["rm", "-f", filepath])
+    return None
 
 
 def extract_og_urls(article_url):
     """提取文章 og:image / twitter:image URL 列表."""
     urls = []
     try:
-        html = run(["curl", "-sL", "--connect-timeout", "10", article_url])
+        html = run(["curl", "-sL", "-H", f"User-Agent: {UA}", "--connect-timeout", "10", article_url])
         if not html:
             return urls
     except Exception:
