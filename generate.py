@@ -66,8 +66,19 @@ def extract_best_image(article_url):
 
 
 def proxy_url(raw_url):
-    """wsrv.nl 代理，绕钉钉防盗链."""
-    return f"https://wsrv.nl/?url={urllib.parse.quote(raw_url, safe='')}"
+    """wsrv.nl → weserv.nl → 原始 URL 三级降级代理."""
+    encoded = urllib.parse.quote(raw_url, safe='')
+    proxies = [
+        f"https://wsrv.nl/?url={encoded}",
+        f"https://images.weserv.nl/?url={encoded}&output=webp",
+    ]
+    for p in proxies:
+        code = run(["curl", "-sL", "-o", "/dev/null", "-w", "%{http_code}",
+                    "--connect-timeout", "8", p])
+        if code == "200":
+            return p
+    # 两个代理都失效，返回原始 URL 碰运气
+    return raw_url
 
 
 def search_with_images(section, queries, needed=3):
