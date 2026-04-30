@@ -112,7 +112,7 @@ def call_deepseek(prompt):
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
-        "max_tokens": 2000,
+        "max_tokens": 3000,
     }).encode()
     req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=payload)
     req.add_header("Content-Type", "application/json")
@@ -126,12 +126,41 @@ def call_deepseek(prompt):
 
 
 def parse_newsletter(ai_output):
+    """尝试解析 AI 输出的 JSON，失败时从半成品 JSON 中尽量提取有效段落."""
+    # 尝试完整 JSON
     m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', ai_output, re.DOTALL)
     if m:
         try: return json.loads(m.group(1))
         except json.JSONDecodeError: pass
     try: return json.loads(ai_output)
-    except json.JSONDecodeError: return None
+    except json.JSONDecodeError: pass
+
+    # 完整解析失败——从截断的 JSON 中逐个提取 section（用正则按 section key 抠）
+    log("完整 JSON 解析失败，尝试逐板块提取...")
+    sections = {}
+    for key in ("壹观", "贰知", "叁赏", "肆律", "伍言"):
+        # 匹配 "壹观": { ... } 直到下一个 "key": 或结束
+        pat = rf'"{key}"\s*:\s*\{{'
+        m = re.search(pat, ai_output)
+        if not m:
+            continue
+        # 找到该 section 的起始位置
+        start = m.start()
+        # 找该 section 的 content 和 url
+        content_m = re.search(rf'"{key}"\s*:\s*\{{.*?"content"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', ai_output[start:], re.DOTALL)
+        title_m = re.search(rf'"{key}"\s*:\s*\{{.*?"title"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', ai_output[start:], re.DOTALL)
+        url_m = re.search(rf'"{key}"\s*:\s*\{{.*?"url"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', ai_output[start:], re.DOTALL)
+        section = {}
+        if content_m:
+            section["content"] = content_m.group(1).replace('\\n', '\n').replace('\\"', '"')
+        if title_m:
+            section["title"] = title_m.group(1).replace('\\"', '"')
+        if url_m:
+            section["url"] = url_m.group(1)
+        if section.get("content"):
+            sections[key] = section
+            log(f"  ✅ 提取 {key}")
+    return sections if sections else None
 
 
 def assemble_markdown(sections, articles):
@@ -228,20 +257,25 @@ def main():
 
     search_config = {
         "壹观": [
-            "site:zcool.com.cn 品牌 设计 案例 2026",
-            "site:ui.cn UI 交互 设计 2026",
-            "site:digitng.com 创意 品牌 设计 2026",
-            "site:shejipi.com 品牌 设计 2026",
+            "站酷 品牌设计 案例 2026",
+            "UI中国 交互设计 精选 2026",
+            "数英网 创意品牌 设计 2026",
+            "site:zcool.com.cn 品牌 设计",
+            "site:ui.cn 设计 作品",
         ],
         "贰知": [
-            "site:huxiu.com AI 人工智能 工具 2026",
-            "site:36kr.com AI 智能 产品 2026",
-            "site:geekpark.net AI 大模型 应用 2026",
+            "虎嗅 AI 人工智能 工具 2026",
+            "36氪 AI 大模型 产品 2026",
+            "极客公园 AI 应用 2026",
+            "site:huxiu.com AI 人工智能",
+            "site:36kr.com AI",
         ],
         "叁赏": [
-            "site:gooood.cn 建筑 设计 展览 2026",
-            "site:archdaily.cn 建筑 设计 2026",
-            "site:position.hn 建筑 摄影 艺术 2026",
+            "谷德 建筑设计 展览 2026",
+            "ArchDaily 中国 建筑 设计 2026",
+            "有方 建筑 摄影 艺术 2026",
+            "site:gooood.cn 建筑",
+            "site:archdaily.cn 设计",
         ],
     }
 
