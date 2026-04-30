@@ -149,14 +149,19 @@ def assemble_markdown(sections, articles):
         lines.append(f"## {key} · {sub}")
         if item.get("title"):
             lines.append(f"**{item['title']}**")
-        # 前 3 条强制配图
+        # 前 3 条配图——发送前最终验证，不通则宁缺毋滥
         if key in ("壹观", "贰知", "叁赏"):
             img = item.get("image", "")
             if not img:
                 art = next((a for a in articles.get(key, []) if a.get("image")), None)
                 img = art["image"] if art else ""
             if img:
-                lines.append(f"![]({img})")
+                ok = run(["curl", "-sL", "-o", "/dev/null", "-w", "%{http_code}",
+                          "--connect-timeout", "6", img])
+                if ok == "200":
+                    lines.append(f"![]({img})")
+                else:
+                    log(f"  ⚠️ {key} 配图 HTTP {ok}，跳过")
         lines.append(item.get("content", ""))
         url = item.get("url", "")
         if not url:
