@@ -303,21 +303,32 @@ def main():
 
     # 构造 prompt
     prompt = f"撰写今日「每日灵感」日报 ({TODAY.strftime('%Y.%m.%d')})。\n\n"
-    prompt += "格式：壹观(品牌/UI 120-180字) 贰知(AI资讯 120-180字) 叁赏(艺术/建筑/摄影 120-180字) 肆律(设计原则 50-80字) 伍言(名人名言双语 50-80字)\n"
-    prompt += "每条末尾标注原始来源链接。\n\n## 素材\n"
+
+    prompt += "## 严格规则\n"
+    prompt += "1. 壹观/贰知/叁赏：各只写 ONE 个案例，素材区每版块第一篇文章即指定案例，必须围绕它撰写\n"
+    prompt += "2. 肆律：一条泛设计原则（如「少即是多」「形式追随功能」），一句话简介\n"
+    prompt += "3. 伍言：ONE 条创意/设计圈名人名言，格式为「名言」—— 作者（职业身份）\n"
+    prompt += "   - 外国作者 → 必须双语：原文 + 中文翻译\n"
+    prompt += "   - 中国作者 → 仅中文\n"
+    prompt += "   - 举例：「少即是多」—— 路德维希·密斯·凡德罗（德国现代主义建筑大师）\n"
+    prompt += '   - 外国举例："Less is more." —— Ludwig Mies van der Rohe（德国现代主义建筑大师） / 「少即是多。」\n\n'
+
+    prompt += "## 素材（壹观/贰知/叁赏 各版块第一篇文章即你该写的案例）\n"
 
     for sec, arts in found.items():
-        prompt += f"### {sec}\n"
-        if arts:
-            for a in arts:
-                prompt += f"- {a['title']}\n  来源:{a['url']}\n  摘要:{a['snippet'][:200]}\n"
+        if sec in ("壹观", "贰知", "叁赏"):
+            prompt += f"### {sec}\n"
+            if arts:
+                a = arts[0]  # 只给第一篇，减少 AI 混乱
+                prompt += f"指定案例：{a['title']}\n来源：{a['url']}\n摘要：{a['snippet'][:300]}\n\n"
+            else:
+                prompt += "（无指定素材，基于你的知识撰写，url 留空）\n\n"
         else:
-            prompt += "（基于你自己的知识撰写，url 字段留空不要编造）\n"
-        prompt += "\n"
+            prompt += f"### {sec}（基于你的知识撰写）\n\n"
 
-    prompt += ("输出 JSON（image 填任意占位，没来源时 url 留空字符串）：\n")
-    prompt += '```json\n{"壹观":{"title":"","content":"","image":"https://placeholder","url":"https://..."},'
-    prompt += '"贰知":{...},"叁赏":{...},"肆律":{"content":"","url":""},"伍言":{"content":"","url":""}}\n```'
+    prompt += "输出 JSON，image 字段填任意占位：\n"
+    prompt += '```json\n{"壹观":{"title":"案例标题","content":"120-180字","image":"x","url":"来源URL"},'
+    prompt += '"贰知":{...},"叁赏":{...},"肆律":{"content":"设计原则+一句话简介"},"伍言":{"content":"名言——作者（职业）"}}\n```'
 
     log("调用 DeepSeek...")
     ai_output = call_deepseek(prompt)
@@ -331,16 +342,16 @@ def main():
         print(ai_output[:500])
         sys.exit(1)
 
-    # 硬编码分配图片和链接：按 section 独立，不信任 AI
+    # 硬编码分配：按 section 独立，不信任 AI 的图片/链接/标题
     for k in ("壹观", "贰知", "叁赏"):
         sections.setdefault(k, {})
         arts = found.get(k, [])
         if arts:
             sections[k]["image"] = arts[0]["image"]
             sections[k]["url"] = arts[0]["url"]
+            sections[k]["title"] = arts[0]["title"]  # 强制标题匹配
             log(f"  {k} → {arts[0]['title'][:40]}")
         else:
-            # 没有搜到真实文章——去掉 AI 编造的 URL 和图片
             sections[k]["url"] = ""
             sections[k]["image"] = ""
             log(f"  {k} 无真实来源，清空图片和链接")
