@@ -90,9 +90,9 @@ def proxy_url(raw_url):
 
 
 SKIP_DOMAINS = {
-    "time.geekbang.org",  # 极客时间 - 卖课广告
-    "geekbang.org",
-    "kaiyanapp.com",      # 开眼 - 广告居多
+    "time.geekbang.org", "geekbang.org",  # 极客时间 - 卖课广告
+    "wikipedia.org", "wikimedia.org",     # 维基百科 - 图文对应关系混乱
+    "kaiyanapp.com",                      # 开眼 - 广告居多
     "iqiyi.com", "youku.com", "bilibili.com",  # 视频平台非资讯
     "zhihu.com",          # 知乎 - 良莠不齐
     "xiaohongshu.com",   # 小红书
