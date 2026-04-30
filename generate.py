@@ -314,6 +314,10 @@ def main():
     history = load_history()
     log(f"历史: {len(history)} 篇已发送")
 
+    # 确保 history.json 存在，方便 workflow 提交
+    if not os.path.exists(HISTORY_FILE):
+        save_history(history)
+
     search_config = {
         "壹观": [  # 品牌创意 + 包装/logo 案例
             "branding rebrand identity design case study",

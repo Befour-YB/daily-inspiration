@@ -31,6 +31,7 @@ jobs:
           DINGTALK_TOKEN: ${{ secrets.DINGTALK_TOKEN }}
       - name: 提交历史记录
         run: |
+          if [ ! -f history.json ]; then echo "history.json 不存在，跳过"; exit 0; fi
           git config user.name "daily-inspiration-bot"
           git config user.email "bot@daily-inspiration"
           git add history.json
