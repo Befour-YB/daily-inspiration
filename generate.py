@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""每日灵感 v1.5 — 白名单模式：仅从信任站点取内容"""
+"""每日灵感 v1.6 — 白名单模式 + 去重：已发文章不再重复发送"""
 
 import json, os, re, subprocess, sys, time, urllib.request, urllib.parse
 from datetime import datetime, timezone, timedelta
@@ -13,6 +13,8 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DINGTALK_TOKEN = os.environ.get("DINGTALK_TOKEN", "")
 DINGTALK_WEBHOOK = f"https://oapi.dingtalk.com/robot/send?access_token={DINGTALK_TOKEN}"
 
+HISTORY_FILE = "history.json"
+
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
@@ -24,6 +26,21 @@ def log(msg):
 def run(cmd, timeout=30):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     return r.stdout.strip()
+
+
+def load_history():
+    """读取已发送文章 URL 历史."""
+    try:
+        with open(HISTORY_FILE) as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def save_history(urls):
+    """写入历史."""
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(sorted(urls), f, ensure_ascii=False)
 
 
 def search_web(query, max_results=5):
@@ -108,8 +125,9 @@ TRUSTED_DOMAINS = {
     ],
 }
 
-def search_with_images(section, queries, trusted_domains, needed=3):
+def search_with_images(section, queries, trusted_domains, history=None, needed=3):
     candidates = []
+    history = history or set()
     for q in queries:
         if len(candidates) >= needed:
             break
@@ -122,6 +140,10 @@ def search_with_images(section, queries, trusted_domains, needed=3):
             # 白名单模式：只保留信任站点
             domain = urllib.parse.urlparse(url).netloc.lower()
             if not any(d in domain for d in trusted_domains):
+                continue
+            # 去重：已发送过的文章跳过
+            if url in history:
+                log(f"  ↺ 跳过已发 {url[:60]}")
                 continue
             img = extract_best_image(url)
             if img:
@@ -289,6 +311,9 @@ def main():
         log("非工作日，跳过")
         return
 
+    history = load_history()
+    log(f"历史: {len(history)} 篇已发送")
+
     search_config = {
         "壹观": [  # 品牌创意 + 包装/logo 案例
             "branding rebrand identity design case study",
@@ -314,7 +339,7 @@ def main():
     found = {}
     for sec, queries in search_config.items():
         log(f"搜索 {sec}...")
-        found[sec] = search_with_images(sec, queries, TRUSTED_DOMAINS.get(sec, []))
+        found[sec] = search_with_images(sec, queries, TRUSTED_DOMAINS.get(sec, []), history=history)
         log(f"  → {len(found[sec])} 篇有图")
         time.sleep(2)  # 避免 DDG 限流
 
@@ -323,7 +348,7 @@ def main():
         log(f"⚠️ {', '.join(missing)} 缺图，补搜")
         backup = {"壹观": "品牌 设计 案例", "贰知": "AI 人工智能 资讯", "叁赏": "建筑 设计 艺术"}
         for k in missing:
-            found[k] = search_with_images(k, [f"{backup[k]} 2026"], TRUSTED_DOMAINS.get(k, []), needed=1)
+            found[k] = search_with_images(k, [f"{backup[k]} 2026"], TRUSTED_DOMAINS.get(k, []), history=history, needed=1)
 
     # 构造 prompt
     prompt = f"撰写今日「每日灵感」日报 ({TODAY.strftime('%Y.%m.%d')})。\n\n"
@@ -384,8 +409,17 @@ def main():
 
     markdown = assemble_markdown(sections, found)
     log(f"Markdown: {len(markdown.encode('utf-8'))} bytes")
-    send_dingtalk(markdown)
-    log("✅ 完成")
+    ok = send_dingtalk(markdown)
+    if ok:
+        # 记录已发送的文章 URL
+        for k in ("壹观", "贰知", "叁赏"):
+            url = sections.get(k, {}).get("url", "")
+            if url:
+                history.add(url)
+        save_history(history)
+        log(f"✅ 完成（历史 {len(history)} 篇）")
+    else:
+        log("❌ 完成但发送失败")
 
 
 if __name__ == "__main__":

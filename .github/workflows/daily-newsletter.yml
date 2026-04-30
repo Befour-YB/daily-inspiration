@@ -27,3 +27,10 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DINGTALK_TOKEN: ${{ secrets.DINGTALK_TOKEN }}
+      - name: 提交历史记录
+        run: |
+          git config user.name "daily-inspiration-bot"
+          git config user.email "bot@daily-inspiration"
+          git add history.json
+          git commit -m "每日灵感 $(date +'%Y.%m.%d') 去重历史" || echo "无变更"
+          git push
