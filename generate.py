@@ -228,19 +228,20 @@ def main():
 
     search_config = {
         "壹观": [
-            "branding identity rebrand case study 2026",
-            "creative brand design identity 2026 -pinterest",
-            "UI UX design award showcase 2026",
+            "site:zcool.com.cn 品牌 设计 案例 2026",
+            "site:ui.cn UI 交互 设计 2026",
+            "site:digitng.com 创意 品牌 设计 2026",
+            "site:shejipi.com 品牌 设计 2026",
         ],
         "贰知": [
-            "site:theverge.com AI artificial intelligence tool 2026",
-            "site:techcrunch.com AI agent startup 2026",
-            "site:arstechnica.com AI product launch 2026",
+            "site:huxiu.com AI 人工智能 工具 2026",
+            "site:36kr.com AI 智能 产品 2026",
+            "site:geekpark.net AI 大模型 应用 2026",
         ],
         "叁赏": [
-            "architecture installation design exhibition 2026 -pinterest",
-            "art sculpture photography contemporary 2026",
-            "creative installation public art 2026",
+            "site:gooood.cn 建筑 设计 展览 2026",
+            "site:archdaily.cn 建筑 设计 2026",
+            "site:position.hn 建筑 摄影 艺术 2026",
         ],
     }
 
@@ -253,7 +254,7 @@ def main():
     missing = [k for k in ("壹观", "贰知", "叁赏") if not found.get(k)]
     if missing:
         log(f"⚠️ {', '.join(missing)} 缺图，补搜")
-        backup = {"壹观": "brand design", "贰知": "AI technology", "叁赏": "art design"}
+        backup = {"壹观": "品牌 设计 案例", "贰知": "AI 人工智能 资讯", "叁赏": "建筑 设计 艺术"}
         for k in missing:
             found[k] = search_with_images(k, [f"{backup[k]} 2026"], needed=1)
 
