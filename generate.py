@@ -16,7 +16,8 @@ DINGTALK_TOKEN = os.environ.get("DINGTALK_TOKEN", "")
 DINGTALK_WEBHOOK = f"https://oapi.dingtalk.com/robot/send?access_token={DINGTALK_TOKEN}"
 CHINA_TZ = timezone(timedelta(hours=8))
 TODAY = datetime.now(CHINA_TZ)
-VERSION = "v1.1"
+VERSION = "v1.2"
+FULL_RUN_UNTIL = datetime(2026, 5, 6, tzinfo=CHINA_TZ)  # 5/6 及之前每天发
 
 
 def log(msg):
@@ -263,8 +264,10 @@ def send_dingtalk(text):
 def main():
     log(f"=== 每日灵感 {TODAY.strftime('%Y.%m.%d')} ===")
 
-    # 1. 检查工作日
-    if not is_working_day():
+    # 1. 检查是否该发：5/6 及之前每天发，5/7 起仅工作日
+    if TODAY <= FULL_RUN_UNTIL:
+        log(f"每日全发模式 ({FULL_RUN_UNTIL.strftime('%m/%d')} 前)")
+    elif not is_working_day():
         log("今天非工作日，跳过")
         return
 
