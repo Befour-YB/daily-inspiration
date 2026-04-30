@@ -89,6 +89,17 @@ def proxy_url(raw_url):
     return raw_url
 
 
+SKIP_DOMAINS = {
+    "time.geekbang.org",  # 极客时间 - 卖课广告
+    "geekbang.org",
+    "kaiyanapp.com",      # 开眼 - 广告居多
+    "iqiyi.com", "youku.com", "bilibili.com",  # 视频平台非资讯
+    "zhihu.com",          # 知乎 - 良莠不齐
+    "xiaohongshu.com",   # 小红书
+    "zcool.com.cn",       # 站酷 - og:image 不稳定
+    "ui.cn",              # UI中国 - 同上
+}
+
 def search_with_images(section, queries, needed=3):
     candidates = []
     for q in queries:
@@ -99,6 +110,10 @@ def search_with_images(section, queries, needed=3):
                 break
             url = r.get("href", "")
             if not url.startswith("http"):
+                continue
+            # 过滤课程/广告/视频类站点
+            domain = urllib.parse.urlparse(url).netloc.lower()
+            if any(d in domain for d in SKIP_DOMAINS):
                 continue
             img = extract_best_image(url)
             if img:
@@ -268,22 +283,22 @@ def main():
 
     search_config = {
         "壹观": [
-            "品牌设计 rebrand 案例",
-            "UI UX 设计 作品 灵感",
+            "branding rebrand identity design case study",
+            "UI UX design award showcase inspiration",
             "site:behance.net brand identity design",
-            "site:dribbble.com design",
+            "site:underconsideration.com brand",
         ],
         "贰知": [
-            "AI 大模型 产品 工具 发布",
-            "人工智能 新应用 案例",
-            "site:theverge.com AI",
-            "site:techcrunch.com AI",
+            "AI artificial intelligence new tool product launch",
+            "AI agent workflow automation startup",
+            "site:theverge.com AI artificial intelligence",
+            "site:techcrunch.com AI startup product",
         ],
         "叁赏": [
-            "建筑 设计 展览 作品",
-            "当代艺术 摄影 装置",
+            "architecture design exhibition installation",
+            "contemporary art sculpture photography",
             "site:dezeen.com architecture design",
-            "site:thisiscolossal.com art",
+            "site:thisiscolossal.com art design",
         ],
     }
 
@@ -305,13 +320,15 @@ def main():
     prompt = f"撰写今日「每日灵感」日报 ({TODAY.strftime('%Y.%m.%d')})。\n\n"
 
     prompt += "## 严格规则\n"
+    prompt += "0. **必须使用简体中文，禁止繁体字**\n"
     prompt += "1. 壹观/贰知/叁赏：各只写 ONE 个案例，素材区每版块第一篇文章即指定案例，必须围绕它撰写\n"
+    prompt += "   禁止使用课程推广、付费培训、广告营销类内容，必须是资讯/案例\n"
     prompt += "2. 肆律：一条泛设计原则（如「少即是多」「形式追随功能」），一句话简介\n"
     prompt += "3. 伍言：ONE 条创意/设计圈名人名言，格式为「名言」—— 作者（职业身份）\n"
     prompt += "   - 外国作者 → 必须双语：原文 + 中文翻译\n"
     prompt += "   - 中国作者 → 仅中文\n"
     prompt += "   - 举例：「少即是多」—— 路德维希·密斯·凡德罗（德国现代主义建筑大师）\n"
-    prompt += '   - 外国举例："Less is more." —— Ludwig Mies van der Rohe（德国现代主义建筑大师） / 「少即是多。」\n\n'
+    prompt += '   - 外国举例："Less is more." —— Ludwig Mies van der Rohe（德国现代主义建筑大师） / 「少即是多。」\n'
 
     prompt += "## 素材（壹观/贰知/叁赏 各版块第一篇文章即你该写的案例）\n"
 
