@@ -62,11 +62,31 @@ def search_web(query, max_results=5):
         return []
 
 
+def verify_image_url(url):
+    """验证图片 URL 是否真的返回一张图片."""
+    try:
+        header = run(["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code} %{content_type}",
+                       "--connect-timeout", "5", url])
+        code, ct = (header.split(None, 1) + ["", ""])[:2]
+        return code == "200" and ct.startswith("image/")
+    except Exception:
+        return False
+
+
 def proxy_image(url):
-    """走 weserv.nl 代理，绕防盗链."""
+    """走图片代理绕防盗链，支持降级."""
     if not url:
         return url
-    return f"https://images.weserv.nl/?url={urllib.parse.quote(url, safe='')}"
+    encoded = urllib.parse.quote(url, safe='')
+    proxies = [
+        f"https://wsrv.nl/?url={encoded}",
+        f"https://images.weserv.nl/?url={encoded}&output=webp",
+    ]
+    for p in proxies:
+        if verify_image_url(p):
+            return p
+    # 两个代理都挂了，返回原始 URL 碰运气
+    return url
 
 
 def extract_og_image(article_url):
@@ -373,21 +393,18 @@ def main():
         print(ai_output[:500])
         sys.exit(1)
 
-    # 6. 智能匹配图片（AI 写了哪篇文章就用哪张图）
+    # 6. 强制使用我们验证过的图片和链接（不信任 AI 输出）
     for k in ("壹观", "贰知", "叁赏"):
         articles = found_articles.get(k, [])
         if not articles:
             continue
-        ai_url = sections.get(k, {}).get("url", "")
-        # 按 URL 精确匹配
-        matched = next((a for a in articles if a["url"] == ai_url), None)
-        if not matched:
-            matched = articles[0]  # fallback
-        # AI 的图如果不是我们代理过的，用匹配到的替代
-        if "weserv.nl" not in (sections.get(k, {}).get("image") or ""):
+        sections.setdefault(k, {})
+        # 优先按 AI 写的 URL 精确匹配，否则取第一篇
+        ai_url = sections[k].get("url", "")
+        matched = next((a for a in articles if a["url"] == ai_url), None) or articles[0]
+        sections[k]["url"] = matched["url"]
+        if matched["image"]:
             sections[k]["image"] = matched["image"]
-        if not sections.get(k, {}).get("url"):
-            sections[k]["url"] = matched["url"]
 
     # 7. 组装并发送
     markdown = assemble_markdown(sections, found_articles)
