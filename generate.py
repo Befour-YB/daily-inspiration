@@ -62,31 +62,12 @@ def search_web(query, max_results=5):
         return []
 
 
-def verify_image_url(url):
-    """验证图片 URL 是否真的返回一张图片."""
-    try:
-        header = run(["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code} %{content_type}",
-                       "--connect-timeout", "5", url])
-        code, ct = (header.split(None, 1) + ["", ""])[:2]
-        return code == "200" and ct.startswith("image/")
-    except Exception:
-        return False
-
-
 def proxy_image(url):
-    """走图片代理绕防盗链，支持降级."""
+    """走图片代理绕防盗链。wsrv.nl 优先，weserv.nl 兜底."""
     if not url:
         return url
     encoded = urllib.parse.quote(url, safe='')
-    proxies = [
-        f"https://wsrv.nl/?url={encoded}",
-        f"https://images.weserv.nl/?url={encoded}&output=webp",
-    ]
-    for p in proxies:
-        if verify_image_url(p):
-            return p
-    # 两个代理都挂了，返回原始 URL 碰运气
-    return url
+    return f"https://wsrv.nl/?url={encoded}"
 
 
 def extract_og_image(article_url):
@@ -393,18 +374,20 @@ def main():
         print(ai_output[:500])
         sys.exit(1)
 
-    # 6. 强制使用我们验证过的图片和链接（不信任 AI 输出）
+    # 6. 强制使用我们验证过的图片和链接
     for k in ("壹观", "贰知", "叁赏"):
         articles = found_articles.get(k, [])
-        if not articles:
-            continue
         sections.setdefault(k, {})
-        # 优先按 AI 写的 URL 精确匹配，否则取第一篇
-        ai_url = sections[k].get("url", "")
-        matched = next((a for a in articles if a["url"] == ai_url), None) or articles[0]
-        sections[k]["url"] = matched["url"]
-        if matched["image"]:
-            sections[k]["image"] = matched["image"]
+        if articles:
+            ai_url = sections[k].get("url", "")
+            matched = next((a for a in articles if a["url"] == ai_url), None) or articles[0]
+            sections[k]["url"] = matched["url"]
+            if matched["image"]:
+                sections[k]["image"] = matched["image"]
+        # 没有搜到文章时，保留 AI 自己生成的图片 URL，但必须走代理
+        ai_img = sections[k].get("image", "")
+        if ai_img and "wsrv.nl" not in ai_img and "weserv.nl" not in ai_img:
+            sections[k]["image"] = proxy_image(ai_img)
 
     # 7. 组装并发送
     markdown = assemble_markdown(sections, found_articles)
