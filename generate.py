@@ -312,7 +312,7 @@ def main():
 每条末尾标注原始来源链接。
 
 ## 今日素材
-以下是为各板块找到的文章（配图已托管在 GitHub，URL 可直接用）：\n\n"""
+以下是为各板块找到的文章（配图已自动处理，你不需要关心 image 字段）：\n\n"""
 
     has_articles = False
     for section, articles in found_articles.items():
@@ -320,13 +320,13 @@ def main():
         if articles:
             has_articles = True
             for a in articles:
-                prompt += f"- 标题：{a['title']}\n  来源：{a['url']}\n  配图：{a['image']}\n  摘要：{a['snippet'][:200]}\n"
+                prompt += f"- 标题：{a['title']}\n  来源：{a['url']}\n  摘要：{a['snippet'][:200]}\n"
         else:
             prompt += "（请基于你的知识撰写）\n"
         prompt += "\n"
 
     if has_articles:
-        prompt += "**重要：每条内容的 image 字段必须使用上面提供的对应配图 URL，严禁编造。**\n"
+        prompt += "**image 字段填任意占位 URL 即可，系统会自动替换为正确配图。**\n"
 
     prompt += """请直接输出 JSON（含所有板块的内容、配图 URL、来源链接），格式：
 
@@ -354,24 +354,21 @@ def main():
         print(ai_output[:500])
         sys.exit(1)
 
-    # 7. 强制使用我们下载的图片和链接
+    # 7. 硬编码图片分配——不信任 AI 的 image 输出，我们搜到什么就用什么
+    image_map = {}  # section → image URL
     for k in ("壹观", "贰知", "叁赏"):
         articles = found_articles.get(k, [])
-        sections.setdefault(k, {})
         if articles:
-            ai_url = sections[k].get("url", "")
-            matched = next((a for a in articles if a["url"] == ai_url), None) or articles[0]
-            sections[k]["url"] = matched["url"]
-            if matched.get("image"):
-                sections[k]["image"] = matched["image"]
-        # AI 自生成的图也走一遍下载验证
-        ai_img = sections[k].get("image", "")
-        if ai_img and RAW_BASE not in ai_img:
-            # 尝试下了看看
-            local = download_image(ai_img, sections[k].get("url", ai_img))
-            if local:
-                sections[k]["image"] = local
-                git_push_images()
+            image_map[k] = articles[0]["image"]
+            log(f"  {k} 配图 → {articles[0]['title'][:40]}")
+    for k in ("壹观", "贰知", "叁赏"):
+        sections.setdefault(k, {})
+        if k in image_map:
+            sections[k]["image"] = image_map[k]
+        # URL 也一样强制匹配
+        articles = found_articles.get(k, [])
+        if articles:
+            sections[k]["url"] = articles[0]["url"]
 
     # 8. 组装并发送
     markdown = assemble_markdown(sections, found_articles)
