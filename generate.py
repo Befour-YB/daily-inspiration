@@ -99,7 +99,7 @@ TRUSTED_DOMAINS = {
         "awwwards.com",
     ],
     "贰知": [  # AI 资讯
-        "theverge.com", "techcrunch.com", "arstechnica.com",
+        "techcrunch.com", "arstechnica.com",
         "36kr.com", "the-decoder.com",
     ],
     "叁赏": [  # 艺术作品
@@ -301,7 +301,6 @@ def main():
         "贰知": [
             "AI artificial intelligence new tool product launch",
             "AI agent workflow automation startup",
-            "site:theverge.com AI artificial intelligence",
             "site:techcrunch.com AI startup product",
         ],
         "叁赏": [
