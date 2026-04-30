@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """每日灵感 v1.4 — 精简版：提取 og:image → wsrv.nl 代理 → 钉钉"""
 
-import json, os, re, subprocess, sys, urllib.request, urllib.parse
+import json, os, re, subprocess, sys, time, urllib.request, urllib.parse
 from datetime import datetime, timezone, timedelta
 
 CHINA_TZ = timezone(timedelta(hours=8))
@@ -28,9 +28,17 @@ def run(cmd, timeout=30):
 
 def search_web(query, max_results=5):
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
         with DDGS() as ddgs:
-            return list(ddgs.text(query, max_results=max_results, backend="html"))
+            return list(ddgs.text(query, max_results=max_results))
+    except ImportError:
+        try:
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                return list(ddgs.text(query, max_results=max_results, backend="html"))
+        except Exception as e:
+            log(f"搜索失败 [{query[:40]}]: {e}")
+            return []
     except Exception as e:
         log(f"搜索失败 [{query[:40]}]: {e}")
         return []
@@ -167,15 +175,18 @@ def assemble_markdown(sections, articles):
     now = TODAY.strftime("%Y.%m.%d")
     lines = [f"# 🎨 每日灵感 {now}\n"]
     config = [
-        ("壹观", "品牌 / UI / 创意案例"),
-        ("贰知", "AI 资讯 / 工具 / 工作流"),
-        ("叁赏", "艺术 / 建筑 / 摄影 / 作品"),
-        ("肆律", "设计原则"),
-        ("伍言", "名人名言"),
+        ("壹观", "品牌创意"),
+        ("贰知", "AI 资讯"),
+        ("叁赏", "艺术作品"),
+        ("肆律", ""),
+        ("伍言", ""),
     ]
     for key, sub in config:
         item = sections.get(key, {})
-        lines.append(f"## {key} · {sub}")
+        if sub:
+            lines.append(f"## {key} · {sub}")
+        else:
+            lines.append(f"## {key}")
         if item.get("title"):
             lines.append(f"**{item['title']}**")
         # 前 3 条配图——发送前最终验证，不通则宁缺毋滥
@@ -257,25 +268,22 @@ def main():
 
     search_config = {
         "壹观": [
-            "站酷 品牌设计 案例 2026",
-            "UI中国 交互设计 精选 2026",
-            "数英网 创意品牌 设计 2026",
-            "site:zcool.com.cn 品牌 设计",
-            "site:ui.cn 设计 作品",
+            "品牌设计 rebrand 案例",
+            "UI UX 设计 作品 灵感",
+            "site:behance.net brand identity design",
+            "site:dribbble.com design",
         ],
         "贰知": [
-            "虎嗅 AI 人工智能 工具 2026",
-            "36氪 AI 大模型 产品 2026",
-            "极客公园 AI 应用 2026",
-            "site:huxiu.com AI 人工智能",
-            "site:36kr.com AI",
+            "AI 大模型 产品 工具 发布",
+            "人工智能 新应用 案例",
+            "site:theverge.com AI",
+            "site:techcrunch.com AI",
         ],
         "叁赏": [
-            "谷德 建筑设计 展览 2026",
-            "ArchDaily 中国 建筑 设计 2026",
-            "有方 建筑 摄影 艺术 2026",
-            "site:gooood.cn 建筑",
-            "site:archdaily.cn 设计",
+            "建筑 设计 展览 作品",
+            "当代艺术 摄影 装置",
+            "site:dezeen.com architecture design",
+            "site:thisiscolossal.com art",
         ],
     }
 
@@ -284,6 +292,7 @@ def main():
         log(f"搜索 {sec}...")
         found[sec] = search_with_images(sec, queries)
         log(f"  → {len(found[sec])} 篇有图")
+        time.sleep(2)  # 避免 DDG 限流
 
     missing = [k for k in ("壹观", "贰知", "叁赏") if not found.get(k)]
     if missing:
@@ -303,10 +312,10 @@ def main():
             for a in arts:
                 prompt += f"- {a['title']}\n  来源:{a['url']}\n  摘要:{a['snippet'][:200]}\n"
         else:
-            prompt += "（基于知识撰写）\n"
+            prompt += "（基于你自己的知识撰写，url 字段留空不要编造）\n"
         prompt += "\n"
 
-    prompt += "输出 JSON（image 字段填任意占位，系统会自动替换）：\n"
+    prompt += ("输出 JSON（image 填任意占位，没来源时 url 留空字符串）：\n")
     prompt += '```json\n{"壹观":{"title":"","content":"","image":"https://placeholder","url":"https://..."},'
     prompt += '"贰知":{...},"叁赏":{...},"肆律":{"content":"","url":""},"伍言":{"content":"","url":""}}\n```'
 
@@ -322,7 +331,7 @@ def main():
         print(ai_output[:500])
         sys.exit(1)
 
-    # 硬编码分配图片：按 section 独立，不信任 AI
+    # 硬编码分配图片和链接：按 section 独立，不信任 AI
     for k in ("壹观", "贰知", "叁赏"):
         sections.setdefault(k, {})
         arts = found.get(k, [])
@@ -330,6 +339,11 @@ def main():
             sections[k]["image"] = arts[0]["image"]
             sections[k]["url"] = arts[0]["url"]
             log(f"  {k} → {arts[0]['title'][:40]}")
+        else:
+            # 没有搜到真实文章——去掉 AI 编造的 URL 和图片
+            sections[k]["url"] = ""
+            sections[k]["image"] = ""
+            log(f"  {k} 无真实来源，清空图片和链接")
 
     markdown = assemble_markdown(sections, found)
     log(f"Markdown: {len(markdown.encode('utf-8'))} bytes")
