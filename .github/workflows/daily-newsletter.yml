@@ -2,7 +2,8 @@ name: 每日灵感
 
 on:
   schedule:
-    - cron: '30 1 * * *'  # 北京时间 9:30
+    - cron: '30 1 * * *'  # 北京时间 9:30（5月7日及以后生效）
+    - cron: '0 22 * * *'  # 北京时间 6:00（5月6日及以前生效）
   workflow_dispatch:
 
 concurrency:

@@ -29,18 +29,38 @@ def run(cmd, timeout=30):
 
 
 def load_history():
-    """读取已发送文章 URL 历史."""
+    """读取已发送历史：文章URL、设计原则、名人名言."""
     try:
         with open(HISTORY_FILE) as f:
-            return set(json.load(f))
+            data = json.load(f)
+            # 兼容旧版（数组转dict）
+            if isinstance(data, list):
+                return {
+                    "articles": set(data),
+                    "design_principles": set(),
+                    "quotes": set()
+                }
+            return {
+                "articles": set(data.get("articles", [])),
+                "design_principles": set(data.get("design_principles", [])),
+                "quotes": set(data.get("quotes", []))
+            }
     except (FileNotFoundError, json.JSONDecodeError):
-        return set()
+        return {
+            "articles": set(),
+            "design_principles": set(),
+            "quotes": set()
+        }
 
 
-def save_history(urls):
+def save_history(history):
     """写入历史."""
     with open(HISTORY_FILE, "w") as f:
-        json.dump(sorted(urls), f, ensure_ascii=False)
+        json.dump({
+            "articles": sorted(history["articles"]),
+            "design_principles": sorted(history["design_principles"]),
+            "quotes": sorted(history["quotes"])
+        }, f, ensure_ascii=False)
 
 
 def search_web(query, max_results=5):
@@ -164,7 +184,7 @@ def call_deepseek(prompt):
             {"role": "system", "content": "你是「每日灵感」的编辑，擅长撰写设计创意日报。用中文。"},
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.7,
+        "temperature": 0.9,  # 调高随机性，减少内容重复
         "max_tokens": 3000,
     }).encode()
     req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions", data=payload)
@@ -305,9 +325,21 @@ def is_working_day():
 def main():
     log(f"=== 每日灵感 {TODAY.strftime('%Y.%m.%d')} ===")
 
+    # 时间判断：5月6日及以前6点发，5月7日及以后9:30发
+    current_hour = TODAY.hour
+    current_minute = TODAY.minute
     if TODAY <= FULL_RUN_UNTIL:
-        log(f"全发模式 (至 {FULL_RUN_UNTIL.strftime('%m/%d')})")
-    elif not is_working_day():
+        log(f"全发模式 (至 {FULL_RUN_UNTIL.strftime('%m/%d')})，6点发送")
+        if not (current_hour == 6 and 0 <= current_minute < 30):
+            log(f"当前时间 {current_hour}:{current_minute:02d}，非6点时段，跳过")
+            return
+    else:
+        log(f"工作日模式，9:30发送")
+        if not (current_hour == 9 and 25 <= current_minute < 40):
+            log(f"当前时间 {current_hour}:{current_minute:02d}，非9:30时段，跳过")
+            return
+
+    if not (TODAY <= FULL_RUN_UNTIL or is_working_day()):
         log("非工作日，跳过")
         return
 
@@ -319,31 +351,39 @@ def main():
         save_history(history)
 
     search_config = {
-        "壹观": [  # 品牌创意 + 包装/logo 案例
-            "branding rebrand identity design case study",
-            "packaging design award label brand",
-            "logo redesign brand identity case study",
-            "UI UX design award showcase inspiration",
-            "site:behance.net brand identity design",
-            "site:underconsideration.com brand",
+        "壹观": [  # 品牌创意 + 包装/logo 案例（降低Behance权重，优先国内站点，加时间维度增加多样性）
+            "2026 branding rebrand identity design case study",
+            "2026 packaging design award label brand",
+            "2026 logo redesign brand identity case study",
+            "2026 UI UX design award showcase inspiration",
+            "site:underconsideration.com brand 2026",
+            "site:zcool.com.cn 品牌设计 2026",
+            "site:logonews.cn logo 2026",
+            "site:behance.net brand identity design 2026",
         ],
-        "贰知": [
-            "AI artificial intelligence new tool product launch",
-            "AI agent workflow automation startup",
-            "site:techcrunch.com AI startup product",
+        "贰知": [  # AI资讯：扩展AI全领域内容，覆盖编程、agent、创作等方向
+            "AI agent workflow automation startup 2026",
+            "claude claude code openclaw codex Hermes cursor new feature 2026",
+            "AI绘画 ComfyUI AI视频 AI音乐 数字人 语音合成 案例 2026",
+            "AI编程 vibe coding vibe designing 开发者工具 2026",
+            "AI tool product launch artificial intelligence new 2026",
+            "site:techcrunch.com AI startup product 2026",
+            "site:36kr.com AI 人工智能 工具 2026",
         ],
         "叁赏": [
-            "architecture design exhibition installation",
-            "contemporary art sculpture photography",
-            "site:dezeen.com architecture design",
-            "site:thisiscolossal.com art design",
+            "architecture design exhibition installation 2026",
+            "contemporary art sculpture photography award 2026",
+            "site:dezeen.com new architecture design",
+            "site:thisiscolossal.com new art design",
+            "site:gooood.cn 建筑设计 2026",
+            "site:designboom.com art installation 2026",
         ],
     }
 
     found = {}
     for sec, queries in search_config.items():
         log(f"搜索 {sec}...")
-        found[sec] = search_with_images(sec, queries, TRUSTED_DOMAINS.get(sec, []), history=history)
+        found[sec] = search_with_images(sec, queries, TRUSTED_DOMAINS.get(sec, []), history=history["articles"])
         log(f"  → {len(found[sec])} 篇有图")
         time.sleep(2)  # 避免 DDG 限流
 
@@ -352,7 +392,7 @@ def main():
         log(f"⚠️ {', '.join(missing)} 缺图，补搜")
         backup = {"壹观": "品牌 设计 案例", "贰知": "AI 人工智能 资讯", "叁赏": "建筑 设计 艺术"}
         for k in missing:
-            found[k] = search_with_images(k, [f"{backup[k]} 2026"], TRUSTED_DOMAINS.get(k, []), history=history, needed=1)
+            found[k] = search_with_images(k, [f"{backup[k]} 2026"], TRUSTED_DOMAINS.get(k, []), history=history["articles"], needed=1)
 
     # 构造 prompt
     prompt = f"撰写今日「每日灵感」日报 ({TODAY.strftime('%Y.%m.%d')})。\n\n"
@@ -360,7 +400,15 @@ def main():
     prompt += "## 严格规则\n"
     prompt += "0. **必须使用简体中文，禁止繁体字**\n"
     prompt += "1. 壹观/贰知/叁赏：各只写 ONE 个案例，素材区每版块第一篇文章即指定案例，必须围绕它撰写\n"
+    prompt += "   - 壹观**只介绍作品/项目本身**，禁止介绍设计师个人经历、生平、采访或个人故事\n"
     prompt += "   禁止使用课程推广、付费培训、广告营销类内容，必须是资讯/案例\n"
+
+    # 加入已发内容去重提示，避免重复
+    prompt += "4. 不要生成以下已经发送过的内容，避免重复：\n"
+    if history["design_principles"]:
+        prompt += "   已发设计原则：\n" + "   - " + "\n   - ".join(list(history["design_principles"])[:20]) + "\n"
+    if history["quotes"]:
+        prompt += "   已发名人名言：\n" + "   - " + "\n   - ".join(list(history["quotes"])[:20]) + "\n"
     prompt += "2. 肆律：一条泛设计原则（如「少即是多」「形式追随功能」），一句话简介\n"
     prompt += "3. 伍言：ONE 条创意/设计圈名人名言，格式为「名言」—— 作者（职业身份）\n"
     prompt += "   - 外国作者 → 必须双语：原文 + 中文翻译\n"
@@ -419,9 +467,16 @@ def main():
         for k in ("壹观", "贰知", "叁赏"):
             url = sections.get(k, {}).get("url", "")
             if url:
-                history.add(url)
+                history["articles"].add(url)
+        # 记录已发送的设计原则和名言（取前30字作为去重指纹）
+        principle = sections.get("肆律", {}).get("content", "").strip()[:30]
+        if principle:
+            history["design_principles"].add(principle)
+        quote = sections.get("伍言", {}).get("content", "").strip()[:30]
+        if quote:
+            history["quotes"].add(quote)
         save_history(history)
-        log(f"✅ 完成（历史 {len(history)} 篇）")
+        log(f"✅ 完成（历史：{len(history['articles'])}篇文章，{len(history['design_principles'])}条原则，{len(history['quotes'])}条名言）")
     else:
         log("❌ 完成但发送失败")
 
