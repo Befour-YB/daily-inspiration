@@ -325,19 +325,25 @@ def is_working_day():
 def main():
     log(f"=== 每日灵感 {TODAY.strftime('%Y.%m.%d')} ===")
 
-    # 时间判断：5月6日及以前6点发，5月7日及以后9:30发
+    # 判断是否是手动触发
+    is_manual_trigger = os.getenv('GITHUB_EVENT_NAME') == 'workflow_dispatch'
+    if is_manual_trigger:
+        log("手动触发，跳过时间校验")
+
+    # 时间判断：5月6日及以前6点发，5月7日及以后9:30发，手动触发时跳过
     current_hour = TODAY.hour
     current_minute = TODAY.minute
-    if TODAY <= FULL_RUN_UNTIL:
-        log(f"全发模式 (至 {FULL_RUN_UNTIL.strftime('%m/%d')})，6点发送")
-        if not (current_hour == 6 and 0 <= current_minute < 30):
-            log(f"当前时间 {current_hour}:{current_minute:02d}，非6点时段，跳过")
-            return
-    else:
-        log(f"工作日模式，9:30发送")
-        if not (current_hour == 9 and 25 <= current_minute < 40):
-            log(f"当前时间 {current_hour}:{current_minute:02d}，非9:30时段，跳过")
-            return
+    if not is_manual_trigger:
+        if TODAY <= FULL_RUN_UNTIL:
+            log(f"全发模式 (至 {FULL_RUN_UNTIL.strftime('%m/%d')})，6点发送")
+            if not (current_hour == 6 and 0 <= current_minute < 30):
+                log(f"当前时间 {current_hour}:{current_minute:02d}，非6点时段，跳过")
+                return
+        else:
+            log(f"工作日模式，9:30发送")
+            if not (current_hour == 9 and 25 <= current_minute < 40):
+                log(f"当前时间 {current_hour}:{current_minute:02d}，非9:30时段，跳过")
+                return
 
     if not (TODAY <= FULL_RUN_UNTIL or is_working_day()):
         log("非工作日，跳过")
