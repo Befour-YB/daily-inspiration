@@ -9,8 +9,8 @@ TODAY = datetime.now(CHINA_TZ)
 VERSION = "v1.4"
 FULL_RUN_UNTIL = datetime(2026, 5, 6, tzinfo=CHINA_TZ)
 
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-DINGTALK_TOKEN = os.environ.get("DINGTALK_TOKEN", "")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+DINGTALK_TOKEN = os.environ.get("DINGTALK_KEY", "") or os.environ.get("DINGTALK_TOKEN", "")
 DINGTALK_WEBHOOK = f"https://oapi.dingtalk.com/robot/send?access_token={DINGTALK_TOKEN}"
 
 HISTORY_FILE = "history.json"
@@ -325,15 +325,15 @@ def is_working_day():
 def main():
     log(f"=== 每日灵感 {TODAY.strftime('%Y.%m.%d')} ===")
 
-    # 判断是否是手动触发
-    is_manual_trigger = os.getenv('GITHUB_EVENT_NAME') == 'workflow_dispatch'
-    if is_manual_trigger:
-        log("手动触发，跳过时间校验")
+    # 判断是否跳过时间校验（手动触发 / 云函数环境）
+    is_manual = os.getenv('GITHUB_EVENT_NAME') == 'workflow_dispatch' or os.getenv('FC_FUNCTION_NAME')
+    if is_manual:
+        log("手动/云函数触发，跳过时间校验")
 
     # 时间判断：5月6日及以前6点发，5月7日及以后9:30发，手动触发时跳过
     current_hour = TODAY.hour
     current_minute = TODAY.minute
-    if not is_manual_trigger:
+    if not is_manual:
         if TODAY <= FULL_RUN_UNTIL:
             log(f"全发模式 (至 {FULL_RUN_UNTIL.strftime('%m/%d')})，6点发送")
             if not (current_hour == 6 and 0 <= current_minute < 30):
@@ -345,9 +345,9 @@ def main():
                 log(f"当前时间 {current_hour}:{current_minute:02d}，非9:30时段，跳过")
                 return
 
-    if not (TODAY <= FULL_RUN_UNTIL or is_working_day()):
-        log("非工作日，跳过")
-        return
+        if not (TODAY <= FULL_RUN_UNTIL or is_working_day()):
+            log("非工作日，跳过")
+            return
 
     history = load_history()
     log(f"历史: {len(history)} 篇已发送")
@@ -485,6 +485,11 @@ def main():
         log(f"✅ 完成（历史：{len(history['articles'])}篇文章，{len(history['design_principles'])}条原则，{len(history['quotes'])}条名言）")
     else:
         log("❌ 完成但发送失败")
+
+
+def handler(event, context):
+    """阿里云函数计算入口"""
+    main()
 
 
 if __name__ == "__main__":
